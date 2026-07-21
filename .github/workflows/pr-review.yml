@@ -22,5 +22,5 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER:      ${{ github.event.pull_request.number }}
           GEMINI_MODEL:   gemini-3.5-flash
-          MAX_DIFF_CHARS: "30000"
+          MAX_DIFF_CHARS: "35000"
         run: python .github/scripts/review.py
