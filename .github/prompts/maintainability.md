@@ -65,9 +65,14 @@ For each rule, state: ID, description, severity (blocker/warning/nit), and corre
 
 ## OUTPUT FORMAT
 
-Return the result strictly as a valid JSON object, with no markdown formatting and no extra text before or after it. The JSON object must have exactly three top-level fields:
+Your entire response MUST be a single JSON object with this exact structure:
+```json
+{"reviews": [{"lineContent": "<string>", "reviewComment": "<string>", "category": "<string>"}]}
+```
 
-- issues: an array of objects, where each object has the fields location, rule, severity, description, future_impact, and suggested_fix. future_impact must describe concretely what becomes harder, riskier, or more error-prone the next time this code needs to change.
-- rules_checked: an array of exactly 10 objects, one per rule from M1 to M10, each with the fields rule_id, status (either "violation_found" or "no_violation"), and note (a short justification, especially for "no_violation" so it is clear the rule was actually evaluated and not skipped).
-- summary: an object with the fields maintainability_score (a value from 1 to 5, where 5 means the code is easy to safely extend and modify) and overall_comment. Do not include any counts of issues by severity in the summary; the issues array itself is the source of truth for counting.
-
+**Rules:**
+1. `lineContent` MUST be the EXACT, full line of code from the diff that you are commenting on, including the leading `+` character. NEVER comment on lines starting with `-` or a space.
+2. `reviewComment` must use GitHub-flavored Markdown. Include the rule ID (e.g. M1, M5) and severity (blocker/warning/nit) at the start. Describe the future impact on maintainability.
+3. `category` must be one of: "bug", "security", "performance", "style", "suggestion".
+4. If you find no issues, return: `{"reviews": []}`.
+5. Do NOT suggest adding more comments to the code.
