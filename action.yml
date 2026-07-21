@@ -10,7 +10,7 @@ inputs:
   max_diff_chars:
     description: "Max diff characters allowed (PRs exceeding this limit will be skipped with a comment)"
     required: false
-    default: "60000"
+    default: "35000"
 
 runs:
   using: "composite"
