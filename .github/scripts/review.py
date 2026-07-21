@@ -75,11 +75,28 @@ def gh_post(path: str, body: dict) -> None:
         return json.loads(r.read())
 
 
+import re
+
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, Exception):
         msg = str(exc).lower()
         return any(k in msg for k in ("503", "502", "429", "unavailable", "quota", "resource exhausted"))
     return False
+
+
+def _custom_wait(retry_state):
+    """If Gemini specifies 'Please retry in X.Xs', parse and wait that exact duration + 2s padding."""
+    exc = retry_state.outcome.exception()
+    if exc:
+        msg = str(exc)
+        match = re.search(r"Please retry in (\d+(?:\.\d+)?)s", msg)
+        if match:
+            wait_sec = float(match.group(1)) + 2.0
+            _log.warning(f"Gemini requested delay. Waiting {wait_sec:.1f}s before next attempt…")
+            return wait_sec
+    # Default exponential wait with minimum 15s for rate limits
+    attempt = retry_state.attempt_number
+    return min(15.0 * (2 ** (attempt - 1)), 60.0)
 
 
 _client = genai.Client(api_key=GEMINI_API_KEY)
@@ -88,7 +105,7 @@ _client = genai.Client(api_key=GEMINI_API_KEY)
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(5),
-    wait=wait_exponential_jitter(initial=10, max=90, jitter=5),
+    wait=_custom_wait,
     before_sleep=before_sleep_log(_log, logging.WARNING),
     reraise=True,
 )
