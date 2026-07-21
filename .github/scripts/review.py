@@ -81,12 +81,14 @@ def gemini(system_prompt: str, user_content: str, retries: int = 3) -> str:
                 resp = json.loads(r.read())
             return resp["candidates"][0]["content"]["parts"][0]["text"]
         except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            print(f"  Gemini HTTP {e.code}: {body[:500]}", file=sys.stderr)
             if e.code in (429, 500, 503) and attempt < retries:
                 wait = 5 * 2 ** (attempt - 1)  # 5s, 10s, 20s
-                print(f"  Gemini {e.code}, retry {attempt}/{retries} in {wait}s…")
+                print(f"  retry {attempt}/{retries} in {wait}s…")
                 time.sleep(wait)
             else:
-                raise
+                raise urllib.error.HTTPError(e.url, e.code, body, e.headers, None)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
