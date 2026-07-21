@@ -274,15 +274,21 @@ def format_agent_section(label: str, result: AgentReviewResult) -> str:
     return "\n".join(lines)
 
 
-def build_comment(agent_sections: list[tuple[str, AgentReviewResult]]) -> str:
+def build_single_agent_comment(label: str, result: AgentReviewResult, index: int, total: int) -> str:
+    section = format_agent_section(label, result)
+    header = f"## 🤖 Agent {index}/{total}: {label}\n\n"
+    footer = "\n<sub>Powered by <b>Gemini Multi-Agent Playbook</b></sub>"
+    return header + section + footer
+
+
+def build_summary_comment(agent_sections: list[tuple[str, AgentReviewResult]]) -> str:
     table_rows = []
     total_issues = 0
     blockers = 0
 
     for label, result in agent_sections:
-        summary = result.summary
-        score   = summary.score
-        issues  = result.issues
+        score  = result.summary.score
+        issues = result.issues
         total_issues += len(issues)
         blockers += sum(1 for i in issues if getattr(i, "severity", "").lower() == "blocker")
 
@@ -290,28 +296,17 @@ def build_comment(agent_sections: list[tuple[str, AgentReviewResult]]) -> str:
         issues_str = f"`{len(issues)} issue(s)`" if len(issues) > 0 else "✅ Pass"
         table_rows.append(f"| {emoji} **{label}** | {score_bar(score)} | {issues_str} |")
 
-    status_header = "🔴 **Action Required**" if blockers > 0 else ("🟡 **Minor Improvements**" if total_issues > 0 else "🟢 **Approved**")
+    status = "🔴 **Action Required**" if blockers > 0 else ("🟡 **Minor Improvements**" if total_issues > 0 else "🟢 **Approved**")
 
-    header = (
-        f"## 🤖 Multi-Agent AI PR Review\n\n"
-        f"### Status: {status_header}\n\n"
+    return (
+        f"## 🤖 Multi-Agent AI PR Review — Summary\n\n"
+        f"### Status: {status}\n\n"
         f"| Dimension | Quality Score | Status |\n"
         f"| :--- | :--- | :--- |\n" +
         "\n".join(table_rows) +
-        "\n\n---\n\n"
-        "### 🔍 Detailed Analysis by Dimension\n\n"
-    )
-
-    body = "\n".join(
-        format_agent_section(label, result)
-        for label, result in agent_sections
-    )
-
-    footer = (
-        "\n---\n"
+        "\n\n---\n"
         "<sub>Powered by <b>Gemini Multi-Agent Playbook</b> · 5 Specialized Quality Reviewers</sub>"
     )
-    return header + body + footer
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -324,14 +319,15 @@ def main():
         diff = diff[:MAX_DIFF_CHARS] + "\n\n[diff truncated — file too large]"
 
     user_msg = f"Review the following code diff:\n\n```diff\n{diff}\n```"
+    total = len(AGENTS)
 
     agent_sections = []
     for i, (slug, label, score_key) in enumerate(AGENTS):
         if i > 0:
-            time.sleep(10)  # pacing: give the model breathing room between agents
+            time.sleep(10)
         prompt_path = PROMPTS_DIR / f"{slug}.md"
         system_prompt = prompt_path.read_text()
-        print(f"Running {label} agent…")
+        print(f"Running {label} agent ({i+1}/{total})…")
         try:
             result = gemini(system_prompt, user_msg)
         except Exception as exc:
@@ -341,10 +337,15 @@ def main():
             )
         agent_sections.append((label, result))
 
-    comment_body = build_comment(agent_sections)
+        # Post this agent's result immediately
+        comment = build_single_agent_comment(label, result, i + 1, total)
+        print(f"  Posting {label} review…")
+        gh_post(f"issues/{PR_NUMBER}/comments", {"body": comment})
 
-    print("Posting review comment…")
-    gh_post(f"issues/{PR_NUMBER}/comments", {"body": comment_body})
+    # Post final summary scorecard
+    summary = build_summary_comment(agent_sections)
+    print("Posting summary scorecard…")
+    gh_post(f"issues/{PR_NUMBER}/comments", {"body": summary})
     print("Done ✅")
 
 
