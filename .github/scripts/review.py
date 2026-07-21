@@ -21,7 +21,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GITHUB_TOKEN   = os.environ["GITHUB_TOKEN"]
 REPO           = os.environ["GITHUB_REPOSITORY"]          # "owner/repo"
 PR_NUMBER      = os.environ["PR_NUMBER"]
-MODEL          = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+MODEL          = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 MAX_DIFF_CHARS = int(os.environ.get("MAX_DIFF_CHARS", "30000"))
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
