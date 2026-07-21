@@ -16,6 +16,8 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+import google.genai as genai
+import google.genai.types as genai_types
 from tenacity import (
     retry,
     retry_if_exception,
@@ -74,42 +76,33 @@ def gh_post(path: str, body: dict) -> None:
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    """Retry on transient HTTP errors and network failures."""
-    if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in (429, 500, 502, 503, 504)
-    return isinstance(exc, urllib.error.URLError)
+    if isinstance(exc, Exception):
+        msg = str(exc).lower()
+        return any(k in msg for k in ("503", "502", "429", "unavailable", "quota", "resource exhausted"))
+    return False
+
+
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 @retry(
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(5),
-    wait=wait_exponential_jitter(initial=5, max=60, jitter=3),
+    wait=wait_exponential_jitter(initial=10, max=90, jitter=5),
     before_sleep=before_sleep_log(_log, logging.WARNING),
     reraise=True,
 )
 def gemini(system_prompt: str, user_content: str) -> str:
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}"
-        f":generateContent?key={GEMINI_API_KEY}"
+    response = _client.models.generate_content(
+        model=MODEL,
+        contents=user_content,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            http_options=genai_types.HttpOptions(timeout=180_000),  # ms
+        ),
     )
-    payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"parts": [{"text": user_content}]}],
-        "generationConfig": {"responseMimeType": "application/json"},
-    }
-    data = json.dumps(payload).encode()
-    # ponytail: new Request each attempt — reusing a consumed urllib Request drops the body
-    req = urllib.request.Request(url, data=data, method="POST", headers={
-        "Content-Type": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=180) as r:
-            resp = json.loads(r.read())
-        return resp["candidates"][0]["content"]["parts"][0]["text"]
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        print(f"  Gemini HTTP {e.code}: {body[:300]}", file=sys.stderr)
-        raise urllib.error.HTTPError(e.url, e.code, body, e.headers, None)
+    return response.text
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────

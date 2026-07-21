@@ -17,7 +17,7 @@ runs:
   steps:
     - name: Install dependencies
       shell: bash
-      run: pip install tenacity --quiet
+      run: pip install tenacity google-genai --quiet
 
     - name: Run 5-agent code review
       shell: bash
