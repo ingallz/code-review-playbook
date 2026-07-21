@@ -73,6 +73,64 @@ def gh_post(path: str, body: dict) -> None:
         return json.loads(r.read())
 
 
+from typing import List, Literal, Optional, Any
+from pydantic import BaseModel, Field, model_validator
+
+# ── Pydantic Schemas ──────────────────────────────────────────────────────────
+
+class RuleCheck(BaseModel):
+    rule_id: str = ""
+    status: str = "no_violation"
+    note: str = ""
+
+
+class Issue(BaseModel):
+    location: str = "Unknown location"
+    rule: str = "N/A"
+    severity: str = "nit"
+    description: str = ""
+    risk_scenario: Optional[str] = None
+    failure_scenario: Optional[str] = None
+    scale_impact: Optional[str] = None
+    suggested_fix: Optional[str] = None
+
+    @property
+    def impact_details(self) -> Optional[str]:
+        return self.risk_scenario or self.failure_scenario or self.scale_impact
+
+
+class AgentSummary(BaseModel):
+    score: int = 5
+    overall_comment: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_score(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Normalize agent-specific score keys into unified 'score'
+            for key in (
+                "score",
+                "readability_score",
+                "correctness_score",
+                "maintainability_score",
+                "performance_score",
+                "reliability_security_score",
+            ):
+                if key in data and data[key] is not None:
+                    try:
+                        data["score"] = int(data[key])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+        return data
+
+
+class AgentReviewResult(BaseModel):
+    issues: List[Issue] = Field(default_factory=list)
+    rules_checked: List[RuleCheck] = Field(default_factory=list)
+    summary: AgentSummary = Field(default_factory=AgentSummary)
+
+
 # ── Model & Rate Limit Config ──────────────────────────────────────────────────
 
 MODEL_HIERARCHY = [
@@ -110,7 +168,6 @@ def derank_model() -> bool:
             _log.warning(f"🔻 Deranking model from {old} to {current_model} due to rate limits.")
             return True
     elif MODEL_HIERARCHY:
-        # If requested model wasn't in hierarchy, fallback to flash
         old = current_model
         current_model = "gemini-2.5-flash"
         _log.warning(f"🔻 Deranking model from {old} to {current_model}.")
@@ -132,7 +189,7 @@ def enforce_rate_limit():
 _client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> str:
+def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> AgentReviewResult:
     global current_model
     
     for attempt in range(max_retries + 1):
@@ -145,20 +202,20 @@ def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> str:
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
+                    response_schema=AgentReviewResult,
                     http_options=genai_types.HttpOptions(timeout=180_000),
                 ),
             )
-            return response.text
+            # Pydantic validation via model_validate_json
+            return AgentReviewResult.model_validate_json(response.text)
         except Exception as exc:
             msg = str(exc)
             _log.warning(f"Attempt {attempt + 1} failed with model {current_model}: {msg[:200]}")
             
-            # If 429 rate limit, try deranking model immediately on first failure
             if ("429" in msg or "resource_exhausted" in msg.lower()) and derank_model():
                 _log.info(f"Retrying immediately with deranked model {current_model}...")
                 continue
             
-            # Transient server error (503/500/502) -> exponential backoff
             if attempt < max_retries:
                 wait_sec = 5.0 * (2 ** attempt)
                 _log.warning(f"Waiting {wait_sec:.1f}s before retry...")
@@ -174,20 +231,20 @@ SCORE_EMOJI    = {5: "🟢", 4: "🟢", 3: "🟡", 2: "🔴", 1: "🔴"}
 
 
 def score_bar(score: int) -> str:
-    if not isinstance(score, int):
+    if not isinstance(score, int) or score <= 0:
         return "`░░░░░` N/A"
     filled = "█" * score
     empty  = "░" * (5 - score)
     return f"`{filled}{empty}` **{score}/5**"
 
 
-def format_agent_section(label: str, score_key: str, result: dict) -> str:
-    issues  = result.get("issues", [])
-    summary = result.get("summary", {})
-    score   = summary.get(score_key, "?")
-    comment = summary.get("overall_comment", "")
+def format_agent_section(label: str, result: AgentReviewResult) -> str:
+    issues  = result.issues
+    summary = result.summary
+    score   = summary.score
+    comment = summary.overall_comment
 
-    emoji = SCORE_EMOJI.get(score, "⚪") if isinstance(score, int) else "⚪"
+    emoji = SCORE_EMOJI.get(score, "⚪") if isinstance(score, int) and score > 0 else "⚪"
     issue_count = len(issues)
     badge = f"{issue_count} issue{'s' if issue_count != 1 else ''}" if issue_count > 0 else "PASSED"
 
@@ -201,41 +258,35 @@ def format_agent_section(label: str, score_key: str, result: dict) -> str:
         lines.append("✅ *No violations found for this dimension.*\n")
     else:
         for iss in issues:
-            sev   = iss.get("severity", "nit")
-            icon  = SEVERITY_EMOJI.get(sev, "🔵")
-            loc   = iss.get("location", "Unknown location")
-            rule  = iss.get("rule", "N/A")
-            desc  = iss.get("description", "")
-            fix   = iss.get("suggested_fix", "")
+            sev_clean = iss.severity.lower() if isinstance(iss.severity, str) else "nit"
+            icon  = SEVERITY_EMOJI.get(sev_clean, "🔵")
 
-            extra_key = next((k for k in ("failure_scenario", "risk_scenario", "scale_impact") if k in iss), None)
-            extra = f"\n> 💡 **Impact/Risk**: *{iss[extra_key]}*" if extra_key else ""
+            extra = f"\n> 💡 **Impact/Risk**: *{iss.impact_details}*" if iss.impact_details else ""
 
-            lines.append(f"#### {icon} `{sev.upper()}` — `{rule}` in **{loc}**")
-            lines.append(f"{desc}{extra}\n")
-            if fix:
+            lines.append(f"#### {icon} `{sev_clean.upper()}` — `{iss.rule}` in **{iss.location}**")
+            lines.append(f"{iss.description}{extra}\n")
+            if iss.suggested_fix:
                 lines.append("```suggestion")
-                lines.append(fix)
+                lines.append(iss.suggested_fix)
                 lines.append("```\n")
 
     lines.append("</details>\n")
     return "\n".join(lines)
 
 
-def build_comment(agent_sections: list[tuple[str, str, dict]]) -> str:
-    # Build Dashboard Overview Table
+def build_comment(agent_sections: list[tuple[str, AgentReviewResult]]) -> str:
     table_rows = []
     total_issues = 0
     blockers = 0
 
-    for label, score_key, result in agent_sections:
-        summary = result.get("summary", {})
-        score   = summary.get(score_key, "?")
-        issues  = result.get("issues", [])
+    for label, result in agent_sections:
+        summary = result.summary
+        score   = summary.score
+        issues  = result.issues
         total_issues += len(issues)
-        blockers += sum(1 for i in issues if i.get("severity") == "blocker")
+        blockers += sum(1 for i in issues if getattr(i, "severity", "").lower() == "blocker")
 
-        emoji = SCORE_EMOJI.get(score, "⚪") if isinstance(score, int) else "⚪"
+        emoji = SCORE_EMOJI.get(score, "⚪") if isinstance(score, int) and score > 0 else "⚪"
         issues_str = f"`{len(issues)} issue(s)`" if len(issues) > 0 else "✅ Pass"
         table_rows.append(f"| {emoji} **{label}** | {score_bar(score)} | {issues_str} |")
 
@@ -252,8 +303,8 @@ def build_comment(agent_sections: list[tuple[str, str, dict]]) -> str:
     )
 
     body = "\n".join(
-        format_agent_section(label, score_key, result)
-        for label, score_key, result in agent_sections
+        format_agent_section(label, result)
+        for label, result in agent_sections
     )
 
     footer = (
@@ -282,12 +333,13 @@ def main():
         system_prompt = prompt_path.read_text()
         print(f"Running {label} agent…")
         try:
-            raw = gemini(system_prompt, user_msg)
-            result = json.loads(raw)
+            result = gemini(system_prompt, user_msg)
         except Exception as exc:
             print(f"  ⚠️  {label} agent failed: {exc}", file=sys.stderr)
-            result = {"issues": [], "summary": {score_key: "?", "overall_comment": f"Agent error: {exc}"}}
-        agent_sections.append((label, score_key, result))
+            result = AgentReviewResult(
+                summary=AgentSummary(score=0, overall_comment=f"Agent error: {exc}")
+            )
+        agent_sections.append((label, result))
 
     comment_body = build_comment(agent_sections)
 
