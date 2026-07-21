@@ -8,9 +8,9 @@ inputs:
     required: false
     default: "gemini-3.5-flash"
   max_diff_chars:
-    description: "Max diff characters to send to the model"
+    description: "Max diff characters allowed (PRs exceeding this limit will be skipped with a comment)"
     required: false
-    default: "30000"
+    default: "60000"
 
 runs:
   using: "composite"

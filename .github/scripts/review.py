@@ -8,7 +8,7 @@ and posts inline comments on specific code lines.
 import sys
 import time
 from config import PR_NUMBER, REPO, MAX_DIFF_CHARS, AGENTS, PROMPTS_DIR
-from github_service import gh_get_diff, gh_post_review
+from github_service import gh_get_diff, gh_post_review, gh_post_issue_comment
 from diff_parser import parse_diff, map_comments_to_positions
 from ai_service import gemini
 
@@ -16,9 +16,24 @@ from ai_service import gemini
 def main():
     print(f"Fetching diff for PR #{PR_NUMBER} in {REPO}…")
     diff = gh_get_diff()
-    if len(diff) > MAX_DIFF_CHARS:
-        print(f"Diff truncated from {len(diff)} → {MAX_DIFF_CHARS} chars")
-        diff = diff[:MAX_DIFF_CHARS] + "\n\n[diff truncated — file too large]"
+    diff_len = len(diff)
+
+    # ponytail: abort review if diff exceeds limit, post PR comment and terminate cleanly
+    if MAX_DIFF_CHARS > 0 and diff_len > MAX_DIFF_CHARS:
+        print(f"⚠️ Diff size ({diff_len:,} chars) exceeds maximum allowed limit ({MAX_DIFF_CHARS:,} chars).")
+        comment_body = (
+            f"⚠️ **Code Review Aborted**: PR diff size ({diff_len:,} characters) "
+            f"exceeds the maximum allowed limit of {MAX_DIFF_CHARS:,} characters.\n\n"
+            f"Có quá nhiều thay đổi trong PR này. Vui lòng chia nhỏ PR thành các PR nhỏ hơn để tự động review."
+        )
+        try:
+            gh_post_issue_comment(comment_body)
+            print("Posted comment on PR and terminating review process.")
+        except Exception as exc:
+            print(f"Failed to post PR issue comment: {exc}", file=sys.stderr)
+        sys.exit(0)
+
+    print(f"Loaded diff ({diff_len:,} chars)")
 
     diff_files = parse_diff(diff)
     print(f"Parsed {len(diff_files)} file(s) from diff")
