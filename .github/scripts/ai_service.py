@@ -62,7 +62,7 @@ def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> Agent
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
                     response_schema=AgentReviewResult,
-                    http_options=genai_types.HttpOptions(timeout=300_000),  # 5 mins
+                    http_options=genai_types.HttpOptions(timeout=1_000_000),  # 1000 seconds
                 ),
             )
             return AgentReviewResult.model_validate_json(response.text)

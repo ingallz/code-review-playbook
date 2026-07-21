@@ -12,7 +12,7 @@ def gh_get_diff() -> str:
         "Accept": "application/vnd.github.v3.diff",
         "X-GitHub-Api-Version": "2022-11-28",
     })
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=120) as r:
         return r.read().decode()
 
 
@@ -34,7 +34,7 @@ def gh_post_review(comments: list[dict]) -> None:
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
     })
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=120) as r:
         json.loads(r.read())
     print(f"  Posted review with {len(comments)} inline comment(s).")
 
@@ -49,5 +49,5 @@ def gh_post_issue_comment(body: str) -> None:
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
     })
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=120) as r:
         json.loads(r.read())
