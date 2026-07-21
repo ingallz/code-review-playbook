@@ -185,7 +185,7 @@ def main():
     agent_sections = []
     for i, (slug, label, score_key) in enumerate(AGENTS):
         if i > 0:
-            time.sleep(3)  # pacing: avoid back-to-back bursts on the same endpoint
+            time.sleep(10)  # pacing: give the model breathing room between agents
         prompt_path = PROMPTS_DIR / f"{slug}.md"
         system_prompt = prompt_path.read_text()
         print(f"Running {label} agent…")
