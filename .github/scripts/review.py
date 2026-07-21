@@ -16,6 +16,18 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+    before_sleep_log,
+)
+import logging
+
+logging.basicConfig(level=logging.INFO)
+_log = logging.getLogger(__name__)
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
@@ -61,7 +73,21 @@ def gh_post(path: str, body: dict) -> None:
         return json.loads(r.read())
 
 
-def gemini(system_prompt: str, user_content: str, retries: int = 3) -> str:
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry on transient HTTP errors and network failures."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in (429, 500, 502, 503, 504)
+    return isinstance(exc, urllib.error.URLError)
+
+
+@retry(
+    retry=retry_if_exception(_is_retryable),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential_jitter(initial=5, max=60, jitter=3),
+    before_sleep=before_sleep_log(_log, logging.WARNING),
+    reraise=True,
+)
+def gemini(system_prompt: str, user_content: str) -> str:
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}"
         f":generateContent?key={GEMINI_API_KEY}"
@@ -72,23 +98,18 @@ def gemini(system_prompt: str, user_content: str, retries: int = 3) -> str:
         "generationConfig": {"responseMimeType": "application/json"},
     }
     data = json.dumps(payload).encode()
+    # ponytail: new Request each attempt — reusing a consumed urllib Request drops the body
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Content-Type": "application/json",
     })
-    for attempt in range(1, retries + 1):
-        try:
-            with urllib.request.urlopen(req) as r:
-                resp = json.loads(r.read())
-            return resp["candidates"][0]["content"]["parts"][0]["text"]
-        except urllib.error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            print(f"  Gemini HTTP {e.code}: {body[:500]}", file=sys.stderr)
-            if e.code in (429, 500, 503) and attempt < retries:
-                wait = 5 * 2 ** (attempt - 1)  # 5s, 10s, 20s
-                print(f"  retry {attempt}/{retries} in {wait}s…")
-                time.sleep(wait)
-            else:
-                raise urllib.error.HTTPError(e.url, e.code, body, e.headers, None)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            resp = json.loads(r.read())
+        return resp["candidates"][0]["content"]["parts"][0]["text"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        print(f"  Gemini HTTP {e.code}: {body[:300]}", file=sys.stderr)
+        raise urllib.error.HTTPError(e.url, e.code, body, e.headers, None)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
@@ -162,7 +183,9 @@ def main():
     user_msg = f"Review the following code diff:\n\n```diff\n{diff}\n```"
 
     agent_sections = []
-    for slug, label, score_key in AGENTS:
+    for i, (slug, label, score_key) in enumerate(AGENTS):
+        if i > 0:
+            time.sleep(3)  # pacing: avoid back-to-back bursts on the same endpoint
         prompt_path = PROMPTS_DIR / f"{slug}.md"
         system_prompt = prompt_path.read_text()
         print(f"Running {label} agent…")
