@@ -70,11 +70,11 @@ def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> Agent
             msg = str(exc)
             _log.warning(f"Attempt {attempt + 1} failed with model {current_model}: {msg[:200]}")
 
-            is_transient_or_rate = any(
+            is_transient_or_rate_or_notfound = any(
                 err in msg.lower()
-                for err in ("429", "resource_exhausted", "504", "503", "gateway timeout", "timed out", "timeout")
+                for err in ("429", "resource_exhausted", "504", "503", "gateway timeout", "timed out", "timeout", "404", "not found")
             )
-            if is_transient_or_rate and derank_model():
+            if is_transient_or_rate_or_notfound and derank_model():
                 _log.info(f"Retrying immediately with deranked model {current_model}...")
                 continue
 
