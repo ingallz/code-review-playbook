@@ -11,6 +11,7 @@ Usage:
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -60,7 +61,7 @@ def gh_post(path: str, body: dict) -> None:
         return json.loads(r.read())
 
 
-def gemini(system_prompt: str, user_content: str) -> str:
+def gemini(system_prompt: str, user_content: str, retries: int = 3) -> str:
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}"
         f":generateContent?key={GEMINI_API_KEY}"
@@ -74,9 +75,18 @@ def gemini(system_prompt: str, user_content: str) -> str:
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Content-Type": "application/json",
     })
-    with urllib.request.urlopen(req) as r:
-        resp = json.loads(r.read())
-    return resp["candidates"][0]["content"]["parts"][0]["text"]
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req) as r:
+                resp = json.loads(r.read())
+            return resp["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 503) and attempt < retries:
+                wait = 5 * 2 ** (attempt - 1)  # 5s, 10s, 20s
+                print(f"  Gemini {e.code}, retry {attempt}/{retries} in {wait}s…")
+                time.sleep(wait)
+            else:
+                raise
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
