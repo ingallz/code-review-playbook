@@ -36,9 +36,7 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GITHUB_TOKEN   = os.environ["GITHUB_TOKEN"]
 REPO           = os.environ["GITHUB_REPOSITORY"]          # "owner/repo"
 PR_NUMBER      = os.environ["PR_NUMBER"]
-MODEL          = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 MAX_DIFF_CHARS = int(os.environ.get("MAX_DIFF_CHARS", "30000"))
-
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 AGENTS = [
@@ -75,51 +73,99 @@ def gh_post(path: str, body: dict) -> None:
         return json.loads(r.read())
 
 
-import re
+# ── Model & Rate Limit Config ──────────────────────────────────────────────────
 
-def _is_retryable(exc: BaseException) -> bool:
-    if isinstance(exc, Exception):
-        msg = str(exc).lower()
-        return any(k in msg for k in ("503", "502", "429", "unavailable", "quota", "resource exhausted"))
+MODEL_HIERARCHY = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
+RPM_LIMITS = {
+    "gemini-3.5-flash": 10,
+    "gemini-2.5-pro": 5,
+    "gemini-2.5-flash": 10,
+    "gemini-2.5-flash-lite": 15,
+    "gemini-2.0-flash": 15,
+    "gemini-2.0-flash-lite": 30,
+}
+
+current_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+last_request_time = 0.0
+
+
+def get_rate_limit_delay(model: str) -> float:
+    rpm = RPM_LIMITS.get(model, 10)
+    return 60.0 / rpm
+
+
+def derank_model() -> bool:
+    global current_model
+    if current_model in MODEL_HIERARCHY:
+        idx = MODEL_HIERARCHY.index(current_model)
+        if idx + 1 < len(MODEL_HIERARCHY):
+            old = current_model
+            current_model = MODEL_HIERARCHY[idx + 1]
+            _log.warning(f"🔻 Deranking model from {old} to {current_model} due to rate limits.")
+            return True
+    elif MODEL_HIERARCHY:
+        # If requested model wasn't in hierarchy, fallback to flash
+        old = current_model
+        current_model = "gemini-2.5-flash"
+        _log.warning(f"🔻 Deranking model from {old} to {current_model}.")
+        return True
     return False
 
 
-def _custom_wait(retry_state):
-    """If Gemini specifies 'Please retry in X.Xs', parse and wait that exact duration + 2s padding."""
-    exc = retry_state.outcome.exception()
-    if exc:
-        msg = str(exc)
-        match = re.search(r"Please retry in (\d+(?:\.\d+)?)s", msg)
-        if match:
-            wait_sec = float(match.group(1)) + 2.0
-            _log.warning(f"Gemini requested delay. Waiting {wait_sec:.1f}s before next attempt…")
-            return wait_sec
-    # Default exponential wait with minimum 15s for rate limits
-    attempt = retry_state.attempt_number
-    return min(15.0 * (2 ** (attempt - 1)), 60.0)
+def enforce_rate_limit():
+    global last_request_time
+    delay = get_rate_limit_delay(current_model)
+    elapsed = time.time() - last_request_time
+    if elapsed < delay:
+        wait = delay - elapsed
+        _log.info(f"⏳ Rate limiting: waiting {wait:.1f}s before request (model: {current_model})")
+        time.sleep(wait)
+    last_request_time = time.time()
 
 
 _client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-@retry(
-    retry=retry_if_exception(_is_retryable),
-    stop=stop_after_attempt(5),
-    wait=_custom_wait,
-    before_sleep=before_sleep_log(_log, logging.WARNING),
-    reraise=True,
-)
-def gemini(system_prompt: str, user_content: str) -> str:
-    response = _client.models.generate_content(
-        model=MODEL,
-        contents=user_content,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            response_mime_type="application/json",
-            http_options=genai_types.HttpOptions(timeout=180_000),  # ms
-        ),
-    )
-    return response.text
+def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> str:
+    global current_model
+    
+    for attempt in range(max_retries + 1):
+        enforce_rate_limit()
+        try:
+            _log.info(f"Sending request using model: {current_model} (attempt {attempt + 1})")
+            response = _client.models.generate_content(
+                model=current_model,
+                contents=user_content,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    http_options=genai_types.HttpOptions(timeout=180_000),
+                ),
+            )
+            return response.text
+        except Exception as exc:
+            msg = str(exc)
+            _log.warning(f"Attempt {attempt + 1} failed with model {current_model}: {msg[:200]}")
+            
+            # If 429 rate limit, try deranking model immediately on first failure
+            if ("429" in msg or "resource_exhausted" in msg.lower()) and derank_model():
+                _log.info(f"Retrying immediately with deranked model {current_model}...")
+                continue
+            
+            # Transient server error (503/500/502) -> exponential backoff
+            if attempt < max_retries:
+                wait_sec = 5.0 * (2 ** attempt)
+                _log.warning(f"Waiting {wait_sec:.1f}s before retry...")
+                time.sleep(wait_sec)
+            else:
+                raise exc
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
