@@ -76,10 +76,10 @@ def gh_post(path: str, body: dict) -> None:
 # ── Model & Rate Limit Config ──────────────────────────────────────────────────
 
 MODEL_HIERARCHY = [
+    "gemini-3.5-flash",
     "gemini-3.1-pro-preview",
     "gemini-3-pro-preview",
     "gemini-2.5-pro",
-    "gemini-3.5-flash",
     "gemini-3-flash-preview",
     "gemini-flash-latest",
     "gemini-2.5-flash",
@@ -88,10 +88,10 @@ MODEL_HIERARCHY = [
 ]
 
 RPM_LIMITS = {
+    "gemini-3.5-flash": 10,
     "gemini-3.1-pro-preview": 5,
     "gemini-3-pro-preview": 5,
     "gemini-2.5-pro": 5,
-    "gemini-3.5-flash": 10,
     "gemini-3-flash-preview": 10,
     "gemini-flash-latest": 10,
     "gemini-2.5-flash": 10,
@@ -99,7 +99,7 @@ RPM_LIMITS = {
     "gemini-2.5-flash-lite": 15,
 }
 
-current_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+current_model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 last_request_time = 0.0
 
 
