@@ -277,7 +277,7 @@ def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> Agent
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
                     response_schema=AgentReviewResult,
-                    http_options=genai_types.HttpOptions(timeout=180_000),
+                    http_options=genai_types.HttpOptions(timeout=300_000),  # 5 mins
                 ),
             )
             return AgentReviewResult.model_validate_json(response.text)
@@ -285,7 +285,11 @@ def gemini(system_prompt: str, user_content: str, max_retries: int = 4) -> Agent
             msg = str(exc)
             _log.warning(f"Attempt {attempt + 1} failed with model {current_model}: {msg[:200]}")
 
-            if ("429" in msg or "resource_exhausted" in msg.lower()) and derank_model():
+            is_transient_or_rate = any(
+                err in msg.lower()
+                for err in ("429", "resource_exhausted", "504", "503", "gateway timeout", "timed out", "timeout")
+            )
+            if is_transient_or_rate and derank_model():
                 _log.info(f"Retrying immediately with deranked model {current_model}...")
                 continue
 
