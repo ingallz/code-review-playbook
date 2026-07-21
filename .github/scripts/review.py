@@ -103,7 +103,7 @@ def gemini(system_prompt: str, user_content: str) -> str:
         "Content-Type": "application/json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=180) as r:
             resp = json.loads(r.read())
         return resp["candidates"][0]["content"]["parts"][0]["text"]
     except urllib.error.HTTPError as e:
