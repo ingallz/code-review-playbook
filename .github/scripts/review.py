@@ -31,12 +31,14 @@ def main():
             time.sleep(10)
         prompt_path = PROMPTS_DIR / f"{slug}.md"
         system_prompt = prompt_path.read_text()
-        print(f"Running {label} agent ({i+1}/{total})…")
+        print(f"\n==================================================")
+        print(f"🤖 [Rule {i+1}/{total}] Running agent: {label} ({slug})")
+        print(f"==================================================")
         try:
-            result = gemini(system_prompt, user_msg)
+            result = gemini(system_prompt, user_msg, agent_name=label)
             print(f"  Got {len(result.reviews)} review(s)")
         except Exception as exc:
-            print(f"  ⚠️  {label} agent failed: {exc}", file=sys.stderr)
+            print(f"  ⚠️  [Rule {i+1}/{total}] {label} agent failed: {exc}", file=sys.stderr)
             continue
 
         comments = map_comments_to_positions(diff_files, result, label)
