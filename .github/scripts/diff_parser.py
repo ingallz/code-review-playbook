@@ -34,8 +34,31 @@ def split_diff_into_chunks(diff_text: str, max_chars: int) -> list[str]:
 
 
 class DiffHunk:
-    def __init__(self, lines: list[str]):
+    def __init__(self, header: str, lines: list[str]):
+        self.header = header
         self.lines = lines
+
+    def get_modified_line_numbers(self) -> list[int]:
+        """Extract 1-indexed line numbers of added (+) lines in the new file."""
+        import re
+        match = re.search(r"\+(\d+)(?:,(\d+))?", self.header)
+        if not match:
+            return []
+
+        start_line = int(match.group(1))
+        modified_lines = []
+        current_new_line = start_line
+
+        for line in self.lines:
+            if line.startswith("+"):
+                modified_lines.append(current_new_line)
+                current_new_line += 1
+            elif line.startswith("-"):
+                pass  # Deleted lines don't increment new file line counter
+            else:
+                current_new_line += 1  # Unchanged context line
+
+        return modified_lines
 
 
 class DiffFile:
@@ -43,35 +66,44 @@ class DiffFile:
         self.path = path
         self.hunks = hunks
 
+    def get_modified_line_numbers(self) -> list[int]:
+        lines = []
+        for hunk in self.hunks:
+            lines.extend(hunk.get_modified_line_numbers())
+        return lines
+
 
 def parse_diff(diff_text: str) -> list[DiffFile]:
     """Parse unified diff into files and hunks."""
     files = []
     current_path = None
+    current_hunk_header = ""
     current_hunk_lines = []
     hunks = []
 
     for line in diff_text.split("\n"):
         if line.startswith("diff --git"):
             if current_path and current_hunk_lines:
-                hunks.append(DiffHunk(current_hunk_lines))
+                hunks.append(DiffHunk(current_hunk_header, current_hunk_lines))
             if current_path:
                 files.append(DiffFile(current_path, hunks))
             current_path = None
+            current_hunk_header = ""
             current_hunk_lines = []
             hunks = []
         elif line.startswith("+++ b/"):
             current_path = line[6:]
         elif line.startswith("@@ "):
             if current_hunk_lines:
-                hunks.append(DiffHunk(current_hunk_lines))
+                hunks.append(DiffHunk(current_hunk_header, current_hunk_lines))
+            current_hunk_header = line
             current_hunk_lines = []
         elif current_path and not line.startswith("--- "):
             if line.startswith("+") or line.startswith("-") or line.startswith(" ") or line == "":
                 current_hunk_lines.append(line)
 
     if current_path and current_hunk_lines:
-        hunks.append(DiffHunk(current_hunk_lines))
+        hunks.append(DiffHunk(current_hunk_header, current_hunk_lines))
     if current_path:
         files.append(DiffFile(current_path, hunks))
 
@@ -97,6 +129,9 @@ def map_comments_to_positions(
                         line_map[normalized] = []
                     line_map[normalized].append((diff_file.path, pos))
 
+    # ponytail: track used indices per normalized line string to avoid position collisions
+    used_indices: dict[str, int] = {}
+
     for review in ai_result.reviews:
         line = review.lineContent
         if not line or not line.strip().startswith("+"):
@@ -107,7 +142,10 @@ def map_comments_to_positions(
             _log.debug(f"  Skipping hallucinated line: {line[:60]}")
             continue
 
-        file_path, position = matches[0]
+        idx = used_indices.get(normalized, 0)
+        file_path, position = matches[min(idx, len(matches) - 1)]
+        used_indices[normalized] = idx + 1
+
         category_emoji = {
             "bug": "🐛", "security": "🔒", "performance": "⚡",
             "style": "🎨", "suggestion": "💡",

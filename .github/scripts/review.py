@@ -11,6 +11,7 @@ from config import PR_NUMBER, REPO, MAX_DIFF_CHARS, AGENTS, PROMPTS_DIR
 from github_service import gh_get_diff, gh_post_review, gh_post_issue_comment
 from diff_parser import parse_diff, map_comments_to_positions, split_diff_into_chunks
 from ai_service import gemini
+from scope_resolver import get_enclosing_scopes
 
 
 def main():
@@ -48,7 +49,20 @@ def main():
         diff_files = parse_diff(chunk)
         print(f"Parsed {len(diff_files)} file(s) in chunk {chunk_idx}")
 
-        user_msg = f"Review the following code diff:\n\n```diff\n{chunk}\n```"
+        scope_info = []
+        for df in diff_files:
+            lines = df.get_modified_line_numbers()
+            if lines:
+                scopes = get_enclosing_scopes(df.path, lines)
+                if scopes:
+                    scope_info.append(f"- `{df.path}`: {', '.join(scopes)}")
+
+        scope_context = ""
+        if scope_info:
+            scope_context = "Enclosing Code Scopes modified:\n" + "\n".join(scope_info) + "\n\n"
+            print(f"  Extracted AST scope context for {len(scope_info)} file(s).")
+
+        user_msg = f"{scope_context}Review the following code diff:\n\n```diff\n{chunk}\n```"
 
         for i, (slug, label) in enumerate(AGENTS):
             if i > 0 or chunk_idx > 1:

@@ -17,7 +17,7 @@ runs:
   steps:
     - name: Install dependencies
       shell: bash
-      run: pip install tenacity google-genai pydantic --quiet
+      run: pip install tenacity google-genai pydantic py-tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript tree-sitter-go --quiet
 
     - name: Run 5-agent code review
       shell: bash
