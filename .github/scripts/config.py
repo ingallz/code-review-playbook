@@ -17,7 +17,9 @@ AGENTS = [
 ]
 
 MODEL_HIERARCHY = [
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
@@ -25,7 +27,9 @@ MODEL_HIERARCHY = [
 ]
 
 RPM_LIMITS = {
+    "gemini-3.6-flash": 5,
     "gemini-3.5-flash": 5,
+    "gemini-3.5-flash-lite": 15,
     "gemini-3-flash-preview":  5,
     "gemini-3.1-flash-lite": 15,
     "gemini-2.5-flash": 5,
