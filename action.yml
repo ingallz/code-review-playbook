@@ -1,0 +1,31 @@
+name: "Multi-Agent PR Review"
+description: "5 independent Gemini agents review Readability, Correctness, Maintainability, Performance, and Reliability."
+author: "code-review-playbook"
+
+inputs:
+  model:
+    description: "Gemini model to use"
+    required: false
+    default: "gemini-3.5-flash"
+  max_diff_chars:
+    description: "Max diff characters allowed (PRs exceeding this limit will be skipped with a comment)"
+    required: false
+    default: "35000"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: pip install tenacity google-genai pydantic tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript tree-sitter-go --quiet
+
+    - name: Run 5-agent code review
+      shell: bash
+      env:
+        GEMINI_API_KEY: ${{ env.GEMINI_API_KEY }}
+        GITHUB_TOKEN:   ${{ env.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER:      ${{ github.event.pull_request.number }}
+        GEMINI_MODEL:   ${{ inputs.model }}
+        MAX_DIFF_CHARS: ${{ inputs.max_diff_chars }}
+      run: python ${{ github.action_path }}/.github/scripts/review.py
