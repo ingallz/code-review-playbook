@@ -3,6 +3,7 @@ name: Multi-Agent PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,14 +14,11 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Run 5-agent code review
+      - name: Run Self PR Review
+        uses: ./
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER:      ${{ github.event.pull_request.number }}
-          GEMINI_MODEL:   gemini-3.5-flash
-          MAX_DIFF_CHARS: "35000"
-        run: python .github/scripts/review.py
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
