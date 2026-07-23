@@ -8,7 +8,7 @@ and posts inline comments on specific code lines.
 import sys
 import time
 from config import PR_NUMBER, REPO, MAX_DIFF_CHARS, AGENTS, PROMPTS_DIR
-from github_service import gh_get_diff, gh_post_review, gh_post_issue_comment
+from github_service import gh_get_diff, gh_post_review
 from diff_parser import parse_diff, map_comments_to_positions, split_diff_into_chunks
 from ai_service import gemini
 from scope_resolver import get_enclosing_scopes
@@ -22,19 +22,8 @@ def main():
     chunks = split_diff_into_chunks(diff, MAX_DIFF_CHARS)
     num_chunks = len(chunks)
 
-    # ponytail: notify if diff is large, then continue processing all chunks sequentially without stopping
     if num_chunks > 1:
         print(f"⚠️ Diff size ({diff_len:,} chars) exceeds chunk limit ({MAX_DIFF_CHARS:,} chars). Splitting into {num_chunks} chunks.")
-        comment_body = (
-            f"ℹ️ **PR Diff Size Notification**: PR diff size ({diff_len:,} characters) "
-            f"exceeds single-batch limit of {MAX_DIFF_CHARS:,} characters.\n\n"
-            f"Hệ thống sẽ tự động chia diff thành {num_chunks} phần và thực hiện review tuần tự toàn bộ code."
-        )
-        try:
-            gh_post_issue_comment(comment_body)
-            print("Posted diff notification comment on PR.")
-        except Exception as exc:
-            print(f"Failed to post PR issue comment: {exc}", file=sys.stderr)
     else:
         print(f"Loaded diff ({diff_len:,} chars)")
 

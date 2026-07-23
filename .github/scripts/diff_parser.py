@@ -4,28 +4,32 @@ from schemas import AgentReviewResult
 _log = logging.getLogger(__name__)
 
 
-# ponytail: splits unified diff into chunks <= max_chars by file/line boundaries
+# ponytail: splits unified diff into chunks by file boundaries (diff --git)
 def split_diff_into_chunks(diff_text: str, max_chars: int) -> list[str]:
     if max_chars <= 0 or len(diff_text) <= max_chars:
         return [diff_text]
 
-    lines = diff_text.splitlines(keepends=True)
+    file_diffs = []
+    current_file = []
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("diff --git ") and current_file:
+            file_diffs.append("".join(current_file))
+            current_file = []
+        current_file.append(line)
+    if current_file:
+        file_diffs.append("".join(current_file))
+
     chunks = []
     current_chunk = []
     current_len = 0
 
-    for line in lines:
-        if line.startswith("diff --git ") and current_len >= max_chars and current_chunk:
+    for fd in file_diffs:
+        if current_len + len(fd) > max_chars and current_chunk:
             chunks.append("".join(current_chunk))
             current_chunk = []
             current_len = 0
-        elif current_len + len(line) > max_chars and current_chunk:
-            chunks.append("".join(current_chunk))
-            current_chunk = []
-            current_len = 0
-
-        current_chunk.append(line)
-        current_len += len(line)
+        current_chunk.append(fd)
+        current_len += len(fd)
 
     if current_chunk:
         chunks.append("".join(current_chunk))

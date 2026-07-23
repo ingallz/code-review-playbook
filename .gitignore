@@ -1,2 +1,5 @@
 gemini-code-review-action
-__pycache__/*
+__pycache__
+run_local.sh
+.env
+.venv/
